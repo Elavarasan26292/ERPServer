@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+const app = require('../app');
+const debug = require('debug')('backend:server');
+const http = require('http');
+const cluster = require('cluster');
+const mongoose = require('mongoose');
+const config = require('../config/config');
+const os = require('os');
+
+if (cluster.isMaster) {
+  const numOfWorkers = os.cpus().length;
+
+  for (let index = 0; index < numOfWorkers; index++) {
+    cluster.fork();
+  }
+
+  // Emit event while a worker is created
+  cluster.on('online', (worker) => {
+    console.log('Worker ' + worker.process.pid + ' is online');
+  });
+
+  // Emit event while worker is died
+  cluster.on('exit', (worker, code, signal) => {
+    console.log('Worker ' + worker.process.pid + ' died with code: ' + code + ', and signal: ' + signal);
+    console.log('Starting a new wroker');
+    cluster.fork();
+  });
+} else {
+  /**
+ * Get port from environment and store in Express.
+ */
+
+  const port = normalizePort(process.env.PORT || config.serverPort);
+  app.set('port', port);
+
+  /**
+   * Create HTTP server.
+   */
+
+  const server = http.createServer(app);
+
+  /**
+   * Listen on provided port, on all network interfaces.
+   */
+
+  server.listen(port);
+  server.on('error', onError);
+  server.on('listening', onListening);
+
+  var mongoConnectionUrl = config.dbUrl; 
+  mongoose.connect(mongoConnectionUrl);
+
+  // When successfully connected
+  mongoose.connection.on('connected', function () {
+    console.log('Mongoose default connection open to ' + mongoConnectionUrl);
+  });
+
+  // If the connection throws an error
+  mongoose.connection.on('error', function (err) {
+    console.log('Mongoose default connection error: ' + err);
+  });
+
+  // When the connection is disconnected
+  mongoose.connection.on('disconnected', function () {
+    console.log('Mongoose default connection disconnected');
+  });
+
+  // If the Node process ends, close the Mongoose connection 
+  process.on('SIGINT', function () {
+    mongoose.connection.close(function () {
+      console.log('Mongoose default connection disconnected through app termination');
+      process.exit(0);
+    });
+  });
+
+
+  /**
+   * Normalize a port into a number, string, or false.
+   */
+
+  function normalizePort(val) {
+    const port = parseInt(val, 10);
+
+    if (isNaN(port)) {
+      // named pipe
+      return val;
+    }
+
+    if (port >= 0) {
+      // port number
+      return port;
+    }
+
+    return false;
+  }
+
+  /**
+   * Event listener for HTTP server "error" event.
+   */
+
+  function onError(error) {
+    if (error.syscall !== 'listen') {
+      throw error;
+    }
+
+    const bind = typeof port === 'string'
+      ? 'Pipe ' + port
+      : 'Port ' + port;
+
+    // handle specific listen errors with friendly messages
+    switch (error.code) {
+      case 'EACCES':
+        console.error(bind + ' requires elevated privileges');
+        process.exit(1);
+        break;
+      case 'EADDRINUSE':
+        console.error(bind + ' is already in use');
+        process.exit(1);
+        break;
+      default:
+        throw error;
+    }
+  }
+
+  /**
+   * Event listener for HTTP server "listening" event.
+   */
+
+  function onListening() {
+    const addr = server.address();
+    const bind = typeof addr === 'string'
+      ? 'pipe ' + addr
+      : 'port ' + addr.port;
+    console.log('Server Process ' + process.pid + ' is listening to all incoming request at ' + bind);
+    debug('Listening on ' + bind);
+  }
+
+}
